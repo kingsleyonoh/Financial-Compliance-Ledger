@@ -14,6 +14,8 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	store "github.com/kingsleyonoh/Financial-Compliance-Ledger/internal/store"
 )
 
 // testDSN returns the PostgreSQL connection string for local dev.
@@ -161,13 +163,14 @@ func TestMigrationsUpAndDown(t *testing.T) {
 	err := m.Up()
 	require.NoError(t, err, "failed to run up migrations")
 
-	// Verify all five tables exist.
+	// Verify all six tables exist.
 	tables := []string{
 		"tenants",
 		"discrepancies",
 		"ledger_events",
 		"escalation_rules",
 		"reports",
+		"notification_log",
 	}
 	for _, tbl := range tables {
 		assert.True(t, tableExists(t, db, tbl), "table %s should exist after up migrations", tbl)
@@ -681,14 +684,242 @@ func TestDefaultValues(t *testing.T) {
 	assert.Equal(t, "pending", reportStatus, "report status should default to 'pending'")
 }
 
-// cleanDB drops all five migration tables if they exist.
+// TestNotificationLogTableSchema verifies 006_create_notification_log columns and indexes.
+func TestNotificationLogTableSchema(t *testing.T) {
+	db := openDB(t)
+	defer db.Close()
+	cleanDB(t, db)
+	m := newMigrate(t, db)
+	require.NoError(t, m.Up(), "up migrations failed")
+	defer func() { _ = m.Down() }()
+
+	cols := []string{
+		"id", "tenant_id", "discrepancy_id", "escalation_rule_id",
+		"channel", "recipient", "status", "hub_response",
+		"attempts", "last_attempt_at", "created_at", "updated_at",
+	}
+	for _, col := range cols {
+		assert.True(t, columnExists(t, db, "notification_log", col), "notification_log.%s should exist", col)
+	}
+
+	// Column types
+	assert.Equal(t, "uuid", columnDataType(t, db, "notification_log", "id"))
+	assert.Equal(t, "uuid", columnDataType(t, db, "notification_log", "tenant_id"))
+	assert.Equal(t, "uuid", columnDataType(t, db, "notification_log", "discrepancy_id"))
+	assert.Equal(t, "character varying", columnDataType(t, db, "notification_log", "channel"))
+	assert.Equal(t, "character varying", columnDataType(t, db, "notification_log", "recipient"))
+	assert.Equal(t, "character varying", columnDataType(t, db, "notification_log", "status"))
+	assert.Equal(t, "jsonb", columnDataType(t, db, "notification_log", "hub_response"))
+	assert.Equal(t, "integer", columnDataType(t, db, "notification_log", "attempts"))
+
+	// Indexes
+	assert.True(t, indexExists(t, db, "idx_notification_log_tenant"), "idx_notification_log_tenant should exist")
+	assert.True(t, indexExists(t, db, "idx_notification_log_status"), "idx_notification_log_status should exist")
+	assert.True(t, indexExists(t, db, "idx_notification_log_discrepancy"), "idx_notification_log_discrepancy should exist")
+}
+
+// TestNotificationLogCheckConstraints verifies CHECK constraints on notification_log.
+func TestNotificationLogCheckConstraints(t *testing.T) {
+	db := openDB(t)
+	defer db.Close()
+	cleanDB(t, db)
+	m := newMigrate(t, db)
+	require.NoError(t, m.Up(), "up migrations failed")
+	defer func() { _ = m.Down() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Insert tenant and discrepancy for FK.
+	_, err := db.ExecContext(ctx, `
+		INSERT INTO tenants (id, name, api_key)
+		VALUES ('a0000000-0000-0000-0000-000000000001', 'Test Tenant', 'hashed_key_notif')
+	`)
+	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO discrepancies (id, tenant_id, external_id, source_system, discrepancy_type, severity, status, title)
+		VALUES ('b0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000001', 'EXT-NOTIF-1', 'test', 'missing', 'high', 'open', 'Test')
+	`)
+	require.NoError(t, err)
+
+	// Valid notification should succeed.
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO notification_log (tenant_id, discrepancy_id, channel, recipient)
+		VALUES ('a0000000-0000-0000-0000-000000000001', 'b0000000-0000-0000-0000-000000000001', 'email', 'user@example.com')
+	`)
+	assert.NoError(t, err, "valid notification_log insert should succeed")
+
+	// Invalid channel should fail.
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO notification_log (tenant_id, discrepancy_id, channel, recipient)
+		VALUES ('a0000000-0000-0000-0000-000000000001', 'b0000000-0000-0000-0000-000000000001', 'sms', 'user@example.com')
+	`)
+	assert.Error(t, err, "invalid channel should be rejected by CHECK constraint")
+
+	// Invalid status should fail.
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO notification_log (tenant_id, discrepancy_id, channel, recipient, status)
+		VALUES ('a0000000-0000-0000-0000-000000000001', 'b0000000-0000-0000-0000-000000000001', 'webhook', 'https://hook.example.com', 'delivered')
+	`)
+	assert.Error(t, err, "invalid status should be rejected by CHECK constraint")
+}
+
+// TestNotificationLogDefaults verifies default values on notification_log.
+func TestNotificationLogDefaults(t *testing.T) {
+	db := openDB(t)
+	defer db.Close()
+	cleanDB(t, db)
+	m := newMigrate(t, db)
+	require.NoError(t, m.Up(), "up migrations failed")
+	defer func() { _ = m.Down() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	_, err := db.ExecContext(ctx, `
+		INSERT INTO tenants (id, name, api_key)
+		VALUES ('a0000000-0000-0000-0000-000000000001', 'Test Tenant', 'hashed_key_notif2')
+	`)
+	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO discrepancies (id, tenant_id, external_id, source_system, discrepancy_type, severity, status, title)
+		VALUES ('b0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000001', 'EXT-NOTIF-DEF', 'test', 'missing', 'high', 'open', 'Test')
+	`)
+	require.NoError(t, err)
+
+	var status string
+	var attempts int
+	err = db.QueryRowContext(ctx, `
+		INSERT INTO notification_log (tenant_id, discrepancy_id, channel, recipient)
+		VALUES ('a0000000-0000-0000-0000-000000000001', 'b0000000-0000-0000-0000-000000000001', 'email', 'user@example.com')
+		RETURNING status, attempts
+	`).Scan(&status, &attempts)
+	require.NoError(t, err)
+	assert.Equal(t, "pending", status, "status should default to 'pending'")
+	assert.Equal(t, 0, attempts, "attempts should default to 0")
+}
+
+// TestNotificationLogForeignKeys verifies FK relationships on notification_log.
+func TestNotificationLogForeignKeys(t *testing.T) {
+	db := openDB(t)
+	defer db.Close()
+	cleanDB(t, db)
+	m := newMigrate(t, db)
+	require.NoError(t, m.Up(), "up migrations failed")
+	defer func() { _ = m.Down() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Non-existent tenant_id should fail.
+	_, err := db.ExecContext(ctx, `
+		INSERT INTO notification_log (tenant_id, discrepancy_id, channel, recipient)
+		VALUES ('00000000-0000-0000-0000-000000000099', '00000000-0000-0000-0000-000000000099', 'email', 'user@example.com')
+	`)
+	assert.Error(t, err, "notification_log with non-existent tenant_id should be rejected by FK")
+
+	// Insert tenant but non-existent discrepancy_id should fail.
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO tenants (id, name, api_key)
+		VALUES ('a0000000-0000-0000-0000-000000000001', 'Test Tenant', 'hashed_key_notif3')
+	`)
+	require.NoError(t, err)
+
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO notification_log (tenant_id, discrepancy_id, channel, recipient)
+		VALUES ('a0000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000099', 'email', 'user@example.com')
+	`)
+	assert.Error(t, err, "notification_log with non-existent discrepancy_id should be rejected by FK")
+
+	// Nullable escalation_rule_id: null should succeed, non-existent should fail.
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO discrepancies (id, tenant_id, external_id, source_system, discrepancy_type, severity, status, title)
+		VALUES ('b0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000001', 'EXT-FK-N', 'test', 'missing', 'high', 'open', 'Test')
+	`)
+	require.NoError(t, err)
+
+	// Null escalation_rule_id is allowed.
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO notification_log (tenant_id, discrepancy_id, escalation_rule_id, channel, recipient)
+		VALUES ('a0000000-0000-0000-0000-000000000001', 'b0000000-0000-0000-0000-000000000001', NULL, 'email', 'user@example.com')
+	`)
+	assert.NoError(t, err, "null escalation_rule_id should be allowed")
+
+	// Non-existent escalation_rule_id should fail.
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO notification_log (tenant_id, discrepancy_id, escalation_rule_id, channel, recipient)
+		VALUES ('a0000000-0000-0000-0000-000000000001', 'b0000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000099', 'email', 'user@example.com')
+	`)
+	assert.Error(t, err, "notification_log with non-existent escalation_rule_id should be rejected by FK")
+}
+
+// TestNewPostgresPool tests the NewPostgresPool function from postgres.go.
+func TestNewPostgresPool(t *testing.T) {
+	pool, err := store.NewPostgresPool(testDSN())
+	require.NoError(t, err, "NewPostgresPool should not return an error")
+	require.NotNil(t, pool, "pool should not be nil")
+	defer pool.Close()
+
+	// Verify the pool can execute a query.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var result int
+	err = pool.QueryRow(ctx, "SELECT 1").Scan(&result)
+	require.NoError(t, err, "pool should execute queries")
+	assert.Equal(t, 1, result, "expected SELECT 1 to return 1")
+}
+
+// TestNewPostgresPoolInvalidURL tests that an invalid URL returns an error.
+func TestNewPostgresPoolInvalidURL(t *testing.T) {
+	pool, err := store.NewPostgresPool("postgres://invalid:invalid@localhost:9999/nonexistent?sslmode=disable&connect_timeout=2")
+	assert.Error(t, err, "NewPostgresPool should return an error for invalid URL")
+	assert.Nil(t, pool, "pool should be nil on error")
+}
+
+// TestRunMigrations tests the RunMigrations function from postgres.go.
+func TestRunMigrations(t *testing.T) {
+	db := openDB(t)
+	defer db.Close()
+	cleanDB(t, db)
+
+	err := store.RunMigrations(testDSN(), migrationsPath())
+	require.NoError(t, err, "RunMigrations should not return an error")
+
+	// Re-open to verify tables after migration.
+	db2 := openDB(t)
+	defer db2.Close()
+
+	// Verify all tables exist after RunMigrations.
+	tables := []string{
+		"tenants",
+		"discrepancies",
+		"ledger_events",
+		"escalation_rules",
+		"reports",
+		"notification_log",
+	}
+	for _, tbl := range tables {
+		assert.True(t, tableExists(t, db2, tbl), "table %s should exist after RunMigrations", tbl)
+	}
+
+	// Clean up.
+	cleanDB(t, db2)
+}
+
+// TestRunMigrationsInvalidURL tests that RunMigrations with a bad URL returns an error.
+func TestRunMigrationsInvalidURL(t *testing.T) {
+	err := store.RunMigrations("postgres://invalid:invalid@localhost:9999/nonexistent?sslmode=disable&connect_timeout=2", migrationsPath())
+	assert.Error(t, err, "RunMigrations should return an error for invalid URL")
+}
+
+// cleanDB drops all six migration tables if they exist.
 func cleanDB(t *testing.T, db *sql.DB) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	// Drop in reverse order of dependencies.
-	tables := []string{"reports", "escalation_rules", "ledger_events", "discrepancies", "tenants"}
+	tables := []string{"notification_log", "reports", "escalation_rules", "ledger_events", "discrepancies", "tenants"}
 	for _, tbl := range tables {
 		_, err := db.ExecContext(ctx, fmt.Sprintf("DROP TABLE IF EXISTS %s CASCADE", tbl))
 		require.NoError(t, err, "failed to drop table %s during cleanup", tbl)
