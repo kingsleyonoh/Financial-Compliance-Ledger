@@ -1,0 +1,14 @@
+.git
+.env
+.env.*
+data/
+.agent/
+.claude/
+.yolo/
+docs/
+*.md
+!go.sum
+bin/
+coverage.out
+.vscode/
+.idea/

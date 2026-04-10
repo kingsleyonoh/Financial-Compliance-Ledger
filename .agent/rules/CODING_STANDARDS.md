@@ -77,7 +77,16 @@ You have a vast library of specialized skills available. **Use them proactively*
 | `chore` | Tooling, workflows, config, dependencies |
 | `style` | Formatting, whitespace, no logic change |
 
-**Scope** = the module, app, or area affected (e.g., `pricing`, `auth`, `db`, `workflows`).
+**Scope** = the module, app, or area affected:
+- `api` — handlers, router, middleware
+- `domain` — entities, state machine
+- `store` — database queries, sqlc
+- `engine` — escalation, ingestion, RAG feeder
+- `notify` — Notification Hub client
+- `report` — PDF generation
+- `config` — env var loading
+- `db` — migrations
+- `nats` — NATS JetStream consumer
 
 **Rules:**
 - Subject line max 72 characters.
@@ -87,12 +96,12 @@ You have a vast library of specialized skills available. **Use them proactively*
 
 **Examples:**
 ```
-feat(pricing): implement UndercutBracket model with tenant FK
-fix(sending): guard against None accounts on sending page
-refactor(db): extract monitoring queries into dedicated mixin
-test(replies): add 11 tests for intent classification edge cases
-docs(context): update CODEBASE_CONTEXT.md with new schema tables
-chore(workflows): add sprint velocity to resume workflow
+feat(engine): implement escalation evaluation goroutine
+fix(store): handle duplicate external_id in discrepancy insert
+refactor(api): extract tenant resolution into middleware
+test(domain): add state machine transition validation tests
+docs(context): update CODEBASE_CONTEXT.md with escalation rules schema
+chore(db): add migration 003 for ledger_events table
 ```
 
 ## AI Discipline Rules (Prevent Common AI Failures)
@@ -102,7 +111,7 @@ chore(workflows): add sprint velocity to resume workflow
 - If you think something SHOULD be added, ASK the user first. Never add it silently.
 
 ### No Phantom Dependencies
-- **NEVER import a package that isn't in the dependency file** (requirements.txt / package.json / etc). Add it FIRST, then use it.
+- **NEVER import a package that isn't in `go.mod`.** Add it FIRST (`go get`), then use it.
 - Before using any library method, **verify it exists** in that version. Don't hallucinate API methods.
 
 ### No Placeholder Code
@@ -164,21 +173,41 @@ chore(workflows): add sprint velocity to resume workflow
 - If no skill matches, proceed normally.
 
 ## File Size Limits
-- **Max 300 lines** per source file. If approaching 250, plan to split.
+- **Max 300 lines** per Go source file (`.go`). If approaching 250, plan to split.
 - **Max 50 lines** per function/method.
-- **Max 200 lines** per class.
+- **Max 200 lines** per struct + all its methods.
+
+## Code Organization Conventions
+
+### Go Package Dependency Hierarchy
+Packages import DOWN only. Never import UP.
+
+- `config` → nothing
+- `domain` → nothing
+- `store` → `domain`, `config`
+- `notify` → `config`
+- `engine` → `store`, `notify`, `domain`, `config`
+- `report` → `store`, `domain`, `config`
+- `api/handlers` → `store`, `engine`, `report`, `domain`
+- `api/router` → `api/handlers`, `api/middleware`
+- `cmd/server` → `api/router`, `engine`, `store`, `config`
+
+### Go Naming Conventions
+- **Files:** `snake_case.go`
+- **Packages:** lowercase, no underscores
+- **Exported types/functions:** `PascalCase`
+- **Unexported:** `camelCase`
+- **Constants:** `PascalCase` or `UPPER_SNAKE_CASE` for env var names
+- **Interfaces:** named by behavior (e.g., `DiscrepancyStore`, `EventPublisher`)
 
 ## PowerShell Environment
-- **ALWAYS activate the virtual environment before ANY `python` or `pip` command:**
-  ```powershell
-  .\venv\Scripts\Activate.ps1
-  ```
-- **NEVER run `pip install` without the venv active.** This installs to system Python and breaks other projects.
-- Verify venv is active: prompt shows `(venv)` prefix. If not, activate first.
+- Go modules are managed via `go mod`. No virtual environment needed.
+- Use `go mod tidy` to clean up dependencies after adding or removing imports.
+- Use `go vet ./...` for static analysis before committing.
+- Use `golangci-lint run` for comprehensive linting.
 - Use `;` to chain commands, **NEVER** `&&`
-- **NEVER use inline `python -c "..."`** for complex code. Write a `.py` file instead.
 - Special characters that break PowerShell: `|`, `>`, `<`, `$`, `()`, `{}`
-- Write Python scripts to files instead of inline commands.
+- For complex code generation, write Go files instead of inline commands.
 
 ## Git Branching Strategy
 

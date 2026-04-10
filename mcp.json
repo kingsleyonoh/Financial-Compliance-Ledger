@@ -1,0 +1,51 @@
+{
+  "name": "financial-compliance-ledger",
+  "version": "1.0.0",
+  "description": "Immutable audit trail for financial discrepancies with escalation workflows",
+  "tools": [
+    {
+      "name": "list_discrepancies",
+      "description": "List discrepancies with optional filters (status, severity, date range)"
+    },
+    {
+      "name": "get_discrepancy",
+      "description": "Get a single discrepancy with its full event timeline"
+    },
+    {
+      "name": "acknowledge_discrepancy",
+      "description": "Acknowledge a discrepancy"
+    },
+    {
+      "name": "investigate_discrepancy",
+      "description": "Start investigation on a discrepancy"
+    },
+    {
+      "name": "resolve_discrepancy",
+      "description": "Resolve a discrepancy with resolution type"
+    },
+    {
+      "name": "add_note",
+      "description": "Add a note to a discrepancy"
+    },
+    {
+      "name": "list_rules",
+      "description": "List escalation rules"
+    },
+    {
+      "name": "create_rule",
+      "description": "Create a new escalation rule"
+    },
+    {
+      "name": "generate_report",
+      "description": "Request a compliance report generation"
+    },
+    {
+      "name": "get_stats",
+      "description": "Get aggregate discrepancy statistics"
+    },
+    {
+      "name": "health_check",
+      "description": "Check service health status"
+    }
+  ]
+}

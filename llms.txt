@@ -1,0 +1,62 @@
+# Financial Compliance Ledger
+
+> Immutable, event-sourced audit trail for financial discrepancies
+
+## What it does
+Consumes discrepancy events from a Transaction Reconciliation Engine via NATS JetStream, writes them to an append-only ledger, enforces configurable escalation workflows (acknowledge → investigate → resolve), generates regulatory-ready PDF reports, and pushes escalation alerts through an Event-Driven Notification Hub. Every mutation is an immutable event — nothing is updated, nothing is deleted.
+
+## Target users
+- Financial compliance teams in regulated European markets (PSD2, DSGVO, MaRisk)
+- Organizations needing audit-proof discrepancy tracking
+- Teams using the broader Klevar ecosystem (Transaction Reconciliation Engine, Notification Hub, RAG Platform)
+
+## Architecture
+- **Language:** Go 1.22+
+- **Framework:** Chi router (HTTP) + standard library
+- **Database:** PostgreSQL 16 (append-only event tables)
+- **Event Bus:** NATS JetStream (durable event consumption)
+- **Report Generation:** wkhtmltopdf (HTML → PDF)
+- **Deployment:** Docker on Hetzner VPS
+- **Multi-tenant:** API key auth, tenant-scoped queries
+
+## API Surface
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | /api/discrepancies | List discrepancies with filters |
+| GET | /api/discrepancies/:id | Single discrepancy with event timeline |
+| POST | /api/discrepancies/:id/acknowledge | Acknowledge a discrepancy |
+| POST | /api/discrepancies/:id/investigate | Start investigation |
+| POST | /api/discrepancies/:id/resolve | Resolve with resolution type |
+| POST | /api/discrepancies/:id/notes | Add note |
+| GET | /api/rules | List escalation rules |
+| POST | /api/rules | Create escalation rule |
+| PUT | /api/rules/:id | Update escalation rule |
+| DELETE | /api/rules/:id | Delete escalation rule |
+| GET | /api/reports | List reports |
+| POST | /api/reports | Request report generation |
+| GET | /api/reports/:id/download | Download PDF report |
+| GET | /api/stats | Aggregate statistics |
+| GET | /api/tenants/me | Current tenant profile |
+| POST | /api/tenants/register | Self-register new tenant |
+| GET | /health | Health check (NATS + PG status) |
+| GET | /metrics | Prometheus metrics |
+
+## Integrations
+| System | Direction | Method |
+|--------|-----------|--------|
+| Transaction Reconciliation Engine | ← inbound | NATS JetStream |
+| Event-Driven Notification Hub | → outbound | REST API |
+| Multi-Agent RAG Platform | → outbound | REST API |
+
+## Getting started
+```bash
+git clone https://github.com/kingsleyonoh/Financial-Compliance-Ledger.git
+cd Financial-Compliance-Ledger
+cp .env.example .env
+docker compose up -d          # Start PostgreSQL + NATS
+go run cmd/server/main.go     # Start server
+```
+
+## Documentation
+- [PRD](docs/financial-compliance-ledger_prd.md) — full product specification
+- [Codebase Context](.agent/rules/CODEBASE_CONTEXT.md) — modules, schema, patterns

@@ -1,0 +1,25 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5441:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: fcl
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-localdev}
+      POSTGRES_DB: compliance_ledger
+    restart: unless-stopped
+
+  nats:
+    image: nats:latest
+    command: ["--js"]
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

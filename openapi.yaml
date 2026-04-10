@@ -1,0 +1,450 @@
+openapi: "3.1.0"
+info:
+  title: Financial Compliance Ledger API
+  version: "1.0.0"
+  description: >
+    Immutable, event-sourced audit trail for financial discrepancies.
+    Consumes discrepancy events via NATS JetStream, enforces escalation
+    workflows (acknowledge, investigate, resolve), generates regulatory-ready
+    PDF reports, and pushes alerts through an Event-Driven Notification Hub.
+    Every mutation is an immutable event — nothing is updated, nothing is deleted.
+  contact:
+    name: Kingsley Onoh
+    url: https://github.com/kingsleyonoh/Financial-Compliance-Ledger
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:8080
+    description: Local development server
+
+security:
+  - ApiKeyAuth: []
+
+tags:
+  - name: discrepancies
+    description: Discrepancy lifecycle management
+  - name: rules
+    description: Escalation rule configuration
+  - name: reports
+    description: Compliance report generation and download
+  - name: stats
+    description: Aggregate statistics
+  - name: tenants
+    description: Tenant management and self-registration
+  - name: health
+    description: Service health and observability
+
+paths:
+  # ── Discrepancies ──────────────────────────────────────────────────────
+  /api/discrepancies:
+    get:
+      tags: [discrepancies]
+      summary: List discrepancies with filters
+      operationId: listDiscrepancies
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+          # TODO: define enum (detected, acknowledged, investigating, resolved)
+        - name: severity
+          in: query
+          schema:
+            type: string
+          # TODO: define enum (low, medium, high, critical)
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: Paginated list of discrepancies
+          # TODO: define schema
+        "401":
+          description: Unauthorized — missing or invalid API key
+
+  /api/discrepancies/{id}:
+    get:
+      tags: [discrepancies]
+      summary: Get a single discrepancy with its full event timeline
+      operationId: getDiscrepancy
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Discrepancy with event timeline
+          # TODO: define schema
+        "404":
+          description: Discrepancy not found
+
+  /api/discrepancies/{id}/acknowledge:
+    post:
+      tags: [discrepancies]
+      summary: Acknowledge a discrepancy
+      operationId: acknowledgeDiscrepancy
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              # TODO: define schema (optional note, acknowledged_by)
+      responses:
+        "200":
+          description: Discrepancy acknowledged
+          # TODO: define schema
+        "404":
+          description: Discrepancy not found
+        "409":
+          description: Invalid state transition
+
+  /api/discrepancies/{id}/investigate:
+    post:
+      tags: [discrepancies]
+      summary: Start investigation on a discrepancy
+      operationId: investigateDiscrepancy
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              # TODO: define schema (optional note, investigator)
+      responses:
+        "200":
+          description: Investigation started
+          # TODO: define schema
+        "404":
+          description: Discrepancy not found
+        "409":
+          description: Invalid state transition
+
+  /api/discrepancies/{id}/resolve:
+    post:
+      tags: [discrepancies]
+      summary: Resolve a discrepancy with resolution type
+      operationId: resolveDiscrepancy
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              # TODO: define schema (resolution_type, note, resolved_by)
+      responses:
+        "200":
+          description: Discrepancy resolved
+          # TODO: define schema
+        "404":
+          description: Discrepancy not found
+        "409":
+          description: Invalid state transition
+
+  /api/discrepancies/{id}/notes:
+    post:
+      tags: [discrepancies]
+      summary: Add a note to a discrepancy
+      operationId: addNote
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              # TODO: define schema (content, author)
+      responses:
+        "201":
+          description: Note added
+          # TODO: define schema
+        "404":
+          description: Discrepancy not found
+
+  # ── Escalation Rules ──────────────────────────────────────────────────
+  /api/rules:
+    get:
+      tags: [rules]
+      summary: List escalation rules
+      operationId: listRules
+      responses:
+        "200":
+          description: List of escalation rules
+          # TODO: define schema
+
+    post:
+      tags: [rules]
+      summary: Create a new escalation rule
+      operationId: createRule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              # TODO: define schema (name, conditions, actions, severity_threshold, timeout)
+      responses:
+        "201":
+          description: Rule created
+          # TODO: define schema
+        "400":
+          description: Invalid rule definition
+
+  /api/rules/{id}:
+    put:
+      tags: [rules]
+      summary: Update an escalation rule
+      operationId: updateRule
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              # TODO: define schema
+      responses:
+        "200":
+          description: Rule updated
+          # TODO: define schema
+        "404":
+          description: Rule not found
+
+    delete:
+      tags: [rules]
+      summary: Delete an escalation rule
+      operationId: deleteRule
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Rule deleted
+        "404":
+          description: Rule not found
+
+  # ── Reports ────────────────────────────────────────────────────────────
+  /api/reports:
+    get:
+      tags: [reports]
+      summary: List generated reports
+      operationId: listReports
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: Paginated list of reports
+          # TODO: define schema
+
+    post:
+      tags: [reports]
+      summary: Request compliance report generation
+      operationId: generateReport
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              # TODO: define schema (report_type, date_range, filters)
+      responses:
+        "202":
+          description: Report generation accepted
+          # TODO: define schema
+        "400":
+          description: Invalid report parameters
+
+  /api/reports/{id}/download:
+    get:
+      tags: [reports]
+      summary: Download a generated PDF report
+      operationId: downloadReport
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: PDF file download
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: Report not found
+        "409":
+          description: Report still generating
+
+  # ── Stats ──────────────────────────────────────────────────────────────
+  /api/stats:
+    get:
+      tags: [stats]
+      summary: Get aggregate discrepancy statistics
+      operationId: getStats
+      parameters:
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Aggregate statistics
+          # TODO: define schema (total, by_status, by_severity, mean_resolution_time)
+
+  # ── Tenants ────────────────────────────────────────────────────────────
+  /api/tenants/me:
+    get:
+      tags: [tenants]
+      summary: Get current tenant profile
+      operationId: getCurrentTenant
+      responses:
+        "200":
+          description: Current tenant details
+          # TODO: define schema
+
+  /api/tenants/register:
+    post:
+      tags: [tenants]
+      summary: Self-register a new tenant
+      operationId: registerTenant
+      security: []  # No API key required for registration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              # TODO: define schema (name, email, organization)
+      responses:
+        "201":
+          description: Tenant created, API key returned
+          # TODO: define schema (tenant_id, api_key)
+        "409":
+          description: Tenant already exists
+
+  # ── Health & Observability ─────────────────────────────────────────────
+  /health:
+    get:
+      tags: [health]
+      summary: Service health check (NATS + PostgreSQL status)
+      operationId: healthCheck
+      security: []
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  postgres:
+                    type: string
+                    example: connected
+                  nats:
+                    type: string
+                    example: connected
+        "503":
+          description: Service is unhealthy
+
+  /metrics:
+    get:
+      tags: [health]
+      summary: Prometheus metrics endpoint
+      operationId: getMetrics
+      security: []
+      responses:
+        "200":
+          description: Prometheus text exposition format
+          content:
+            text/plain:
+              schema:
+                type: string
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: Tenant-scoped API key issued during registration

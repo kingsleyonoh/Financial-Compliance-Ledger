@@ -77,7 +77,7 @@ Before moving from RED → GREEN, verify ALL applicable categories have tests:
 2. **Max 300 lines per test file** — split if larger
 3. **`setUp` creates only what that class needs** — no global fixtures
 4. **Tests are independent** — no shared state, no ordering dependency
-5. **Any single test can run in isolation** — `python -m pytest tests/test_x.py::TestClass::test_method`
+5. **Any single test can run in isolation** — `go test -run TestFunctionName ./internal/store/...`
 6. **Test names describe business behavior** — not technical actions
 7. **No test helpers longer than 10 lines** — extract to a `tests/factories.py` if needed
 
