@@ -12,18 +12,22 @@ import (
 
 	"github.com/kingsleyonoh/Financial-Compliance-Ledger/internal/api/handlers"
 	mw "github.com/kingsleyonoh/Financial-Compliance-Ledger/internal/api/middleware"
+	"github.com/kingsleyonoh/Financial-Compliance-Ledger/internal/config"
 )
 
 // RouterDeps holds all dependencies needed to construct the router.
 // Fields are nil-safe: if Pool is nil, tenant middleware is skipped
 // (useful for unit tests that don't need DB).
 type RouterDeps struct {
-	Pool   *pgxpool.Pool
-	Logger zerolog.Logger
+	Pool          *pgxpool.Pool
+	Logger        zerolog.Logger
+	Config        *config.Config
+	HealthHandler *handlers.HealthHandler
+	TenantHandler *handlers.TenantHandler
 }
 
 // NewRouter creates a configured Chi router with all route groups,
-// middleware, and placeholder handlers.
+// middleware, and handlers.
 func NewRouter(deps RouterDeps) *chi.Mux {
 	r := chi.NewRouter()
 
@@ -33,33 +37,29 @@ func NewRouter(deps RouterDeps) *chi.Mux {
 	r.Use(mw.RequestLogger(deps.Logger))
 	r.Use(chimw.Recoverer)
 
-	// Public routes
-	r.Get("/health", healthHandler)
-
-	// Public tenant registration (no auth)
-	r.Route("/api/tenants", func(r chi.Router) {
-		r.Post("/register", placeholderHandler)
-	})
+	// Public routes (no auth required)
+	r.Get("/health", healthRoute(deps))
+	r.Post("/api/tenants/register", registerRoute(deps))
 
 	// Authenticated API routes
-	r.Route("/api", func(r chi.Router) {
-		// Apply tenant auth middleware only if pool is available
+	r.Group(func(r chi.Router) {
 		if deps.Pool != nil {
 			tm := mw.NewTenantMiddleware(deps.Pool)
 			r.Use(tm.Handler)
 		} else {
-			// In tests without DB, reject with 401 for auth-required routes
 			r.Use(requireAuthStub)
 		}
 
-		r.Route("/discrepancies", func(r chi.Router) {
+		r.Get("/api/tenants/me", tenantMeRoute(deps))
+
+		r.Route("/api/discrepancies", func(r chi.Router) {
 			r.Get("/", placeholderHandler)
 			r.Post("/", placeholderHandler)
 			r.Get("/{id}", placeholderHandler)
 			r.Put("/{id}/status", placeholderHandler)
 		})
 
-		r.Route("/rules", func(r chi.Router) {
+		r.Route("/api/rules", func(r chi.Router) {
 			r.Get("/", placeholderHandler)
 			r.Post("/", placeholderHandler)
 			r.Get("/{id}", placeholderHandler)
@@ -67,23 +67,46 @@ func NewRouter(deps RouterDeps) *chi.Mux {
 			r.Delete("/{id}", placeholderHandler)
 		})
 
-		r.Route("/reports", func(r chi.Router) {
+		r.Route("/api/reports", func(r chi.Router) {
 			r.Get("/", placeholderHandler)
 			r.Post("/", placeholderHandler)
 			r.Get("/{id}", placeholderHandler)
 			r.Get("/{id}/download", placeholderHandler)
 		})
 
-		r.Route("/stats", func(r chi.Router) {
-			r.Get("/", placeholderHandler)
-		})
+		r.Get("/api/stats", placeholderHandler)
 	})
 
 	return r
 }
 
-// healthHandler returns a simple health check response.
-func healthHandler(w http.ResponseWriter, r *http.Request) {
+// healthRoute returns the health handler or a default.
+func healthRoute(deps RouterDeps) http.HandlerFunc {
+	if deps.HealthHandler != nil {
+		return deps.HealthHandler.Handle
+	}
+	return defaultHealthHandler
+}
+
+// registerRoute returns the register handler or a placeholder.
+func registerRoute(deps RouterDeps) http.HandlerFunc {
+	if deps.TenantHandler != nil {
+		return deps.TenantHandler.Register
+	}
+	return placeholderHandler
+}
+
+// tenantMeRoute returns the GetMe handler or a placeholder.
+func tenantMeRoute(deps RouterDeps) http.HandlerFunc {
+	if deps.TenantHandler != nil {
+		return deps.TenantHandler.GetMe
+	}
+	return placeholderHandler
+}
+
+// defaultHealthHandler returns a simple health check when no
+// HealthHandler is configured (backward compatibility).
+func defaultHealthHandler(w http.ResponseWriter, r *http.Request) {
 	handlers.RespondJSON(w, http.StatusOK, map[string]string{
 		"status": "ok",
 	})
