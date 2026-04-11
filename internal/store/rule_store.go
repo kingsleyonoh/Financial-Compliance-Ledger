@@ -45,9 +45,7 @@ func (s *RuleStore) Create(
 		return nil, fmt.Errorf("rule_store.Create: marshal config: %w", err)
 	}
 
-	var r domain.EscalationRule
-	var configOut []byte
-	err = s.pool.QueryRow(ctx, `
+	row := s.pool.QueryRow(ctx, `
 		INSERT INTO escalation_rules
 			(tenant_id, name, severity_match, trigger_after_hrs,
 			 trigger_status, action, action_config, is_active, priority)
@@ -58,46 +56,30 @@ func (s *RuleStore) Create(
 	`, tenantID, rule.Name, rule.SeverityMatch, rule.TriggerAfterHrs,
 		rule.TriggerStatus, rule.Action, configBytes,
 		rule.IsActive, rule.Priority,
-	).Scan(
-		&r.ID, &r.TenantID, &r.Name, &r.SeverityMatch,
-		&r.TriggerAfterHrs, &r.TriggerStatus, &r.Action,
-		&configOut, &r.IsActive, &r.Priority,
-		&r.CreatedAt, &r.UpdatedAt,
 	)
+	r, err := scanRule(row)
 	if err != nil {
 		return nil, fmt.Errorf("rule_store.Create: %w", err)
 	}
-	if configOut != nil {
-		_ = json.Unmarshal(configOut, &r.ActionConfig)
-	}
-	return &r, nil
+	return r, nil
 }
 
 // GetByID fetches an escalation rule by tenant_id and id.
 func (s *RuleStore) GetByID(
 	ctx context.Context, tenantID uuid.UUID, id uuid.UUID,
 ) (*domain.EscalationRule, error) {
-	var r domain.EscalationRule
-	var configOut []byte
-	err := s.pool.QueryRow(ctx, `
+	row := s.pool.QueryRow(ctx, `
 		SELECT id, tenant_id, name, severity_match, trigger_after_hrs,
 			trigger_status, action, action_config, is_active, priority,
 			created_at, updated_at
 		FROM escalation_rules
 		WHERE tenant_id = $1 AND id = $2
-	`, tenantID, id).Scan(
-		&r.ID, &r.TenantID, &r.Name, &r.SeverityMatch,
-		&r.TriggerAfterHrs, &r.TriggerStatus, &r.Action,
-		&configOut, &r.IsActive, &r.Priority,
-		&r.CreatedAt, &r.UpdatedAt,
-	)
+	`, tenantID, id)
+	r, err := scanRule(row)
 	if err != nil {
 		return nil, fmt.Errorf("rule_store.GetByID: %w", err)
 	}
-	if configOut != nil {
-		_ = json.Unmarshal(configOut, &r.ActionConfig)
-	}
-	return &r, nil
+	return r, nil
 }
 
 // List returns escalation rules for the given tenant, ordered by priority.
@@ -126,21 +108,11 @@ func (s *RuleStore) List(
 
 	var rules []*domain.EscalationRule
 	for rows.Next() {
-		var r domain.EscalationRule
-		var configOut []byte
-		err := rows.Scan(
-			&r.ID, &r.TenantID, &r.Name, &r.SeverityMatch,
-			&r.TriggerAfterHrs, &r.TriggerStatus, &r.Action,
-			&configOut, &r.IsActive, &r.Priority,
-			&r.CreatedAt, &r.UpdatedAt,
-		)
+		r, err := scanRule(rows)
 		if err != nil {
 			return nil, fmt.Errorf("rule_store.List: scan: %w", err)
 		}
-		if configOut != nil {
-			_ = json.Unmarshal(configOut, &r.ActionConfig)
-		}
-		rules = append(rules, &r)
+		rules = append(rules, r)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("rule_store.List: rows: %w", err)
@@ -148,68 +120,72 @@ func (s *RuleStore) List(
 	return rules, nil
 }
 
+// setBuilder accumulates SET clause fragments and positional args.
+type setBuilder struct {
+	clauses []string
+	args    []interface{}
+	idx     int
+}
+
+func newSetBuilder() *setBuilder { return &setBuilder{idx: 1} }
+
+func (b *setBuilder) add(col string, val interface{}) {
+	b.clauses = append(b.clauses, fmt.Sprintf("%s = $%d", col, b.idx))
+	b.args = append(b.args, val)
+	b.idx++
+}
+
+// buildRuleUpdateSets builds the SET clauses and args for a partial
+// rule update. Returns the clauses, args, next arg index, and any error.
+func buildRuleUpdateSets(
+	updates RuleUpdate,
+) ([]string, []interface{}, int, error) {
+	b := newSetBuilder()
+	if updates.Name != nil {
+		b.add("name", *updates.Name)
+	}
+	if updates.SeverityMatch != nil {
+		b.add("severity_match", *updates.SeverityMatch)
+	}
+	if updates.TriggerAfterHrs != nil {
+		b.add("trigger_after_hrs", *updates.TriggerAfterHrs)
+	}
+	if updates.TriggerStatus != nil {
+		b.add("trigger_status", *updates.TriggerStatus)
+	}
+	if updates.Action != nil {
+		b.add("action", *updates.Action)
+	}
+	if updates.ActionConfig != nil {
+		configBytes, err := json.Marshal(*updates.ActionConfig)
+		if err != nil {
+			return nil, nil, 0, fmt.Errorf("marshal config: %w", err)
+		}
+		b.add("action_config", configBytes)
+	}
+	if updates.IsActive != nil {
+		b.add("is_active", *updates.IsActive)
+	}
+	if updates.Priority != nil {
+		b.add("priority", *updates.Priority)
+	}
+	return b.clauses, b.args, b.idx, nil
+}
+
 // Update performs a partial update on an escalation rule. Only non-nil
 // fields in RuleUpdate are changed. Returns the updated rule.
 func (s *RuleStore) Update(
 	ctx context.Context, tenantID uuid.UUID, id uuid.UUID, updates RuleUpdate,
 ) (*domain.EscalationRule, error) {
-	setClauses := []string{}
-	args := []interface{}{}
-	argIdx := 1
-
-	if updates.Name != nil {
-		setClauses = append(setClauses, fmt.Sprintf("name = $%d", argIdx))
-		args = append(args, *updates.Name)
-		argIdx++
+	setClauses, args, nextIdx, err := buildRuleUpdateSets(updates)
+	if err != nil {
+		return nil, fmt.Errorf("rule_store.Update: %w", err)
 	}
-	if updates.SeverityMatch != nil {
-		setClauses = append(setClauses, fmt.Sprintf("severity_match = $%d", argIdx))
-		args = append(args, *updates.SeverityMatch)
-		argIdx++
-	}
-	if updates.TriggerAfterHrs != nil {
-		setClauses = append(setClauses, fmt.Sprintf("trigger_after_hrs = $%d", argIdx))
-		args = append(args, *updates.TriggerAfterHrs)
-		argIdx++
-	}
-	if updates.TriggerStatus != nil {
-		setClauses = append(setClauses, fmt.Sprintf("trigger_status = $%d", argIdx))
-		args = append(args, *updates.TriggerStatus)
-		argIdx++
-	}
-	if updates.Action != nil {
-		setClauses = append(setClauses, fmt.Sprintf("action = $%d", argIdx))
-		args = append(args, *updates.Action)
-		argIdx++
-	}
-	if updates.ActionConfig != nil {
-		configBytes, err := json.Marshal(*updates.ActionConfig)
-		if err != nil {
-			return nil, fmt.Errorf("rule_store.Update: marshal config: %w", err)
-		}
-		setClauses = append(setClauses, fmt.Sprintf("action_config = $%d", argIdx))
-		args = append(args, configBytes)
-		argIdx++
-	}
-	if updates.IsActive != nil {
-		setClauses = append(setClauses, fmt.Sprintf("is_active = $%d", argIdx))
-		args = append(args, *updates.IsActive)
-		argIdx++
-	}
-	if updates.Priority != nil {
-		setClauses = append(setClauses, fmt.Sprintf("priority = $%d", argIdx))
-		args = append(args, *updates.Priority)
-		argIdx++
-	}
-
 	if len(setClauses) == 0 {
-		// No fields to update — just return the current rule
 		return s.GetByID(ctx, tenantID, id)
 	}
 
 	setClauses = append(setClauses, "updated_at = NOW()")
-
-	// Add WHERE params
 	args = append(args, tenantID, id)
 	query := fmt.Sprintf(`
 		UPDATE escalation_rules
@@ -218,26 +194,16 @@ func (s *RuleStore) Update(
 		RETURNING id, tenant_id, name, severity_match, trigger_after_hrs,
 			trigger_status, action, action_config, is_active, priority,
 			created_at, updated_at
-	`, strings.Join(setClauses, ", "), argIdx, argIdx+1)
+	`, strings.Join(setClauses, ", "), nextIdx, nextIdx+1)
 
-	var r domain.EscalationRule
-	var configOut []byte
-	err := s.pool.QueryRow(ctx, query, args...).Scan(
-		&r.ID, &r.TenantID, &r.Name, &r.SeverityMatch,
-		&r.TriggerAfterHrs, &r.TriggerStatus, &r.Action,
-		&configOut, &r.IsActive, &r.Priority,
-		&r.CreatedAt, &r.UpdatedAt,
-	)
+	r, err := scanRule(s.pool.QueryRow(ctx, query, args...))
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, fmt.Errorf("rule_store.Update: not found")
 		}
 		return nil, fmt.Errorf("rule_store.Update: %w", err)
 	}
-	if configOut != nil {
-		_ = json.Unmarshal(configOut, &r.ActionConfig)
-	}
-	return &r, nil
+	return r, nil
 }
 
 // Delete removes an escalation rule by tenant_id and id.

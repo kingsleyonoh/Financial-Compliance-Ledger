@@ -7,20 +7,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/kingsleyonoh/Financial-Compliance-Ledger/internal/domain"
 )
-
-// DBTX is a common interface satisfied by both *pgxpool.Pool and pgx.Tx,
-// enabling store methods to run inside or outside a transaction.
-type DBTX interface {
-	Exec(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error)
-	QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row
-	Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error)
-}
 
 // ListFilters holds filter and pagination options for listing discrepancies.
 type ListFilters struct {
@@ -117,6 +107,108 @@ func (s *DiscrepancyStore) GetByExternalID(
 	return d, nil
 }
 
+// buildListWhere builds a WHERE clause and args from ListFilters.
+// When includeCursor is true the cursor condition is appended.
+func buildListWhere(
+	tenantID uuid.UUID, filters ListFilters, includeCursor bool,
+) (string, []interface{}, int) {
+	args := []interface{}{tenantID}
+	where := "WHERE tenant_id = $1"
+	idx := 2
+
+	if filters.Status != "" {
+		where += fmt.Sprintf(" AND status = $%d", idx)
+		args = append(args, filters.Status)
+		idx++
+	}
+	if filters.Severity != "" {
+		where += fmt.Sprintf(" AND severity = $%d", idx)
+		args = append(args, filters.Severity)
+		idx++
+	}
+	if filters.DiscrepancyType != "" {
+		where += fmt.Sprintf(" AND discrepancy_type = $%d", idx)
+		args = append(args, filters.DiscrepancyType)
+		idx++
+	}
+	if filters.SourceSystem != "" {
+		where += fmt.Sprintf(" AND source_system = $%d", idx)
+		args = append(args, filters.SourceSystem)
+		idx++
+	}
+	if filters.DateFrom != nil {
+		where += fmt.Sprintf(" AND created_at >= $%d", idx)
+		args = append(args, *filters.DateFrom)
+		idx++
+	}
+	if filters.DateTo != nil {
+		where += fmt.Sprintf(" AND created_at <= $%d", idx)
+		args = append(args, *filters.DateTo)
+		idx++
+	}
+	if includeCursor && filters.Cursor != "" {
+		where += fmt.Sprintf(
+			" AND (created_at, id) < (SELECT created_at, id FROM discrepancies WHERE id = $%d)",
+			idx,
+		)
+		args = append(args, filters.Cursor)
+		idx++
+	}
+	return where, args, idx
+}
+
+// listCount returns the total number of discrepancies matching filters
+// (ignoring cursor and limit).
+func (s *DiscrepancyStore) listCount(
+	ctx context.Context, tenantID uuid.UUID, filters ListFilters,
+) (int, error) {
+	where, args, _ := buildListWhere(tenantID, filters, false)
+	var total int
+	q := fmt.Sprintf("SELECT COUNT(*) FROM discrepancies %s", where)
+	if err := s.pool.QueryRow(ctx, q, args...).Scan(&total); err != nil {
+		return 0, fmt.Errorf("discrepancy_store.List: count: %w", err)
+	}
+	return total, nil
+}
+
+// listPage fetches a single page of discrepancies matching filters.
+func (s *DiscrepancyStore) listPage(
+	ctx context.Context, tenantID uuid.UUID,
+	filters ListFilters, limit int,
+) ([]*domain.Discrepancy, error) {
+	where, args, nextIdx := buildListWhere(tenantID, filters, true)
+	query := fmt.Sprintf(`
+		SELECT id, tenant_id, external_id, source_system, discrepancy_type,
+			severity, status, title, description, amount_expected,
+			amount_actual, currency, metadata, first_detected_at,
+			resolved_at, created_at, updated_at
+		FROM discrepancies
+		%s
+		ORDER BY created_at DESC, id DESC
+		LIMIT $%d
+	`, where, nextIdx)
+	args = append(args, limit)
+
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("discrepancy_store.List: query: %w", err)
+	}
+	defer rows.Close()
+
+	var results []*domain.Discrepancy
+	for rows.Next() {
+		d, err := scanDiscrepancyRow(rows)
+		if err != nil {
+			return nil, fmt.Errorf("discrepancy_store.List: scan: %w", err)
+		}
+		results = append(results, d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("discrepancy_store.List: rows: %w", err)
+	}
+	return results, nil
+}
+
 // List returns discrepancies matching the given filters with cursor-based
 // pagination. Returns the results and total count.
 func (s *DiscrepancyStore) List(
@@ -130,123 +222,14 @@ func (s *DiscrepancyStore) List(
 		limit = 100
 	}
 
-	// Build WHERE clauses
-	args := []interface{}{tenantID}
-	where := "WHERE tenant_id = $1"
-	argIdx := 2
-
-	if filters.Status != "" {
-		where += fmt.Sprintf(" AND status = $%d", argIdx)
-		args = append(args, filters.Status)
-		argIdx++
-	}
-	if filters.Severity != "" {
-		where += fmt.Sprintf(" AND severity = $%d", argIdx)
-		args = append(args, filters.Severity)
-		argIdx++
-	}
-	if filters.DiscrepancyType != "" {
-		where += fmt.Sprintf(" AND discrepancy_type = $%d", argIdx)
-		args = append(args, filters.DiscrepancyType)
-		argIdx++
-	}
-	if filters.SourceSystem != "" {
-		where += fmt.Sprintf(" AND source_system = $%d", argIdx)
-		args = append(args, filters.SourceSystem)
-		argIdx++
-	}
-	if filters.DateFrom != nil {
-		where += fmt.Sprintf(" AND created_at >= $%d", argIdx)
-		args = append(args, *filters.DateFrom)
-		argIdx++
-	}
-	if filters.DateTo != nil {
-		where += fmt.Sprintf(" AND created_at <= $%d", argIdx)
-		args = append(args, *filters.DateTo)
-		argIdx++
-	}
-
-	// Cursor-based pagination: fetch rows after the cursor item
-	if filters.Cursor != "" {
-		where += fmt.Sprintf(
-			" AND (created_at, id) < (SELECT created_at, id FROM discrepancies WHERE id = $%d)",
-			argIdx,
-		)
-		args = append(args, filters.Cursor)
-		argIdx++
-	}
-
-	// Count total (without cursor/limit)
-	countArgs := []interface{}{tenantID}
-	countWhere := "WHERE tenant_id = $1"
-	countIdx := 2
-	if filters.Status != "" {
-		countWhere += fmt.Sprintf(" AND status = $%d", countIdx)
-		countArgs = append(countArgs, filters.Status)
-		countIdx++
-	}
-	if filters.Severity != "" {
-		countWhere += fmt.Sprintf(" AND severity = $%d", countIdx)
-		countArgs = append(countArgs, filters.Severity)
-		countIdx++
-	}
-	if filters.DiscrepancyType != "" {
-		countWhere += fmt.Sprintf(" AND discrepancy_type = $%d", countIdx)
-		countArgs = append(countArgs, filters.DiscrepancyType)
-		countIdx++
-	}
-	if filters.SourceSystem != "" {
-		countWhere += fmt.Sprintf(" AND source_system = $%d", countIdx)
-		countArgs = append(countArgs, filters.SourceSystem)
-		countIdx++
-	}
-	if filters.DateFrom != nil {
-		countWhere += fmt.Sprintf(" AND created_at >= $%d", countIdx)
-		countArgs = append(countArgs, *filters.DateFrom)
-		countIdx++
-	}
-	if filters.DateTo != nil {
-		countWhere += fmt.Sprintf(" AND created_at <= $%d", countIdx)
-		countArgs = append(countArgs, *filters.DateTo)
-		countIdx++
-	}
-
-	var total int
-	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM discrepancies %s", countWhere)
-	err := s.pool.QueryRow(ctx, countQuery, countArgs...).Scan(&total)
+	total, err := s.listCount(ctx, tenantID, filters)
 	if err != nil {
-		return nil, 0, fmt.Errorf("discrepancy_store.List: count: %w", err)
+		return nil, 0, err
 	}
 
-	// Fetch page
-	query := fmt.Sprintf(`
-		SELECT id, tenant_id, external_id, source_system, discrepancy_type,
-			severity, status, title, description, amount_expected,
-			amount_actual, currency, metadata, first_detected_at,
-			resolved_at, created_at, updated_at
-		FROM discrepancies
-		%s
-		ORDER BY created_at DESC, id DESC
-		LIMIT $%d
-	`, where, argIdx)
-	args = append(args, limit)
-
-	rows, err := s.pool.Query(ctx, query, args...)
+	results, err := s.listPage(ctx, tenantID, filters, limit)
 	if err != nil {
-		return nil, 0, fmt.Errorf("discrepancy_store.List: query: %w", err)
-	}
-	defer rows.Close()
-
-	var results []*domain.Discrepancy
-	for rows.Next() {
-		d, err := scanDiscrepancyRow(rows)
-		if err != nil {
-			return nil, 0, fmt.Errorf("discrepancy_store.List: scan: %w", err)
-		}
-		results = append(results, d)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, 0, fmt.Errorf("discrepancy_store.List: rows: %w", err)
+		return nil, 0, err
 	}
 
 	return results, total, nil
@@ -299,50 +282,3 @@ func GetByIDWith(
 	return d, nil
 }
 
-// scanDiscrepancy scans a single row from QueryRow into a Discrepancy.
-func scanDiscrepancy(row pgx.Row) (*domain.Discrepancy, error) {
-	var d domain.Discrepancy
-	var metadataBytes []byte
-	err := row.Scan(
-		&d.ID, &d.TenantID, &d.ExternalID, &d.SourceSystem,
-		&d.DiscrepancyType, &d.Severity, &d.Status, &d.Title,
-		&d.Description, &d.AmountExpected, &d.AmountActual,
-		&d.Currency, &metadataBytes, &d.FirstDetectedAt,
-		&d.ResolvedAt, &d.CreatedAt, &d.UpdatedAt,
-	)
-	if err != nil {
-		return nil, err
-	}
-	if metadataBytes != nil {
-		_ = json.Unmarshal(metadataBytes, &d.Metadata)
-	}
-	return &d, nil
-}
-
-// scanDiscrepancyRow scans a row from Query (pgx.Rows) into a Discrepancy.
-func scanDiscrepancyRow(rows pgx.Rows) (*domain.Discrepancy, error) {
-	var d domain.Discrepancy
-	var metadataBytes []byte
-	err := rows.Scan(
-		&d.ID, &d.TenantID, &d.ExternalID, &d.SourceSystem,
-		&d.DiscrepancyType, &d.Severity, &d.Status, &d.Title,
-		&d.Description, &d.AmountExpected, &d.AmountActual,
-		&d.Currency, &metadataBytes, &d.FirstDetectedAt,
-		&d.ResolvedAt, &d.CreatedAt, &d.UpdatedAt,
-	)
-	if err != nil {
-		return nil, err
-	}
-	if metadataBytes != nil {
-		_ = json.Unmarshal(metadataBytes, &d.Metadata)
-	}
-	return &d, nil
-}
-
-// nilIfZero returns nil if the time is zero-value, otherwise a pointer.
-func nilIfZero(t time.Time) *time.Time {
-	if t.IsZero() {
-		return nil
-	}
-	return &t
-}
