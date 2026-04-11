@@ -72,6 +72,22 @@ func main() {
 		MetricsHandler:     metricsHandler,
 	})
 
+	// Shared context for all background goroutines
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Start NATS JetStream ingestion consumer
+	ingestion, err := engine.NewIngestion(&cfg, ds, es, pool, logger)
+	if err != nil {
+		logger.Warn().Err(err).Msg("failed to create NATS ingestion consumer — running without event ingestion")
+	} else {
+		if startErr := ingestion.Start(ctx); startErr != nil {
+			logger.Warn().Err(startErr).Msg("failed to start NATS ingestion consumer")
+		} else {
+			defer func() { _ = ingestion.Stop() }()
+		}
+	}
+
 	// Notification Hub client
 	hubClient := notify.NewHubClient(&cfg, logger)
 	ns := store.NewNotificationStore(pool)
@@ -81,8 +97,6 @@ func main() {
 	escEngine := engine.NewEscalationEngine(
 		rs, ds, es, pool, logger, escalationInterval)
 	escEngine.WithNotifications(ns, hubClient)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	go escEngine.Start(ctx)
 
 	// Start notification retry goroutine

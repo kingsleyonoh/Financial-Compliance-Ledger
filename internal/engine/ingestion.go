@@ -61,6 +61,21 @@ func NewIngestion(
 		return nil, fmt.Errorf("ingestion.New: get JetStream context: %w", err)
 	}
 
+	// Ensure a JetStream stream exists covering our subject. If one
+	// already exists (possibly with additional subjects), just use it.
+	_, err = js.AddStream(&nats.StreamConfig{
+		Name:     "RECON",
+		Subjects: []string{cfg.NATSSubject},
+	})
+	if err != nil {
+		// Stream may already exist — check if we can reach it.
+		if _, infoErr := js.StreamInfo("RECON"); infoErr != nil {
+			nc.Close()
+			return nil, fmt.Errorf("ingestion.New: ensure stream: %w", err)
+		}
+		// Stream exists, proceed.
+	}
+
 	return &Ingestion{
 		nc:               nc,
 		js:               js,

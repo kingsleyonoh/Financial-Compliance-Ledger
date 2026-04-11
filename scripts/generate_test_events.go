@@ -43,11 +43,14 @@ type testPayload struct {
 	Metadata        map[string]interface{} `json:"metadata"`
 }
 
+// DB CHECK constraint allows: missing, mismatch, duplicate, timing.
+// The PRD references unmatched_gateway/unmatched_ledger/amount_mismatch/date_mismatch
+// as Recon Engine event names, but the stored type must match the DB enum.
 var discrepancyTypes = []string{
-	"unmatched_gateway",
-	"unmatched_ledger",
-	"amount_mismatch",
-	"date_mismatch",
+	"missing",
+	"mismatch",
+	"duplicate",
+	"timing",
 }
 
 var sourceSystems = []string{

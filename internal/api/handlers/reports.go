@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -101,7 +102,9 @@ func (h *ReportsHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	// Start background generation if generator is available
 	if h.reportGenerator != nil {
-		go h.reportGenerator.Generate(r.Context(), tid, created) //nolint:errcheck
+		// Use background context — r.Context() is cancelled when the
+		// HTTP response is sent, which would kill the goroutine.
+		go h.reportGenerator.Generate(context.Background(), tid, created) //nolint:errcheck
 	}
 
 	RespondJSON(w, http.StatusAccepted, map[string]interface{}{
