@@ -18,6 +18,7 @@ import (
 	"github.com/kingsleyonoh/Financial-Compliance-Ledger/internal/api/handlers"
 	mw "github.com/kingsleyonoh/Financial-Compliance-Ledger/internal/api/middleware"
 	"github.com/kingsleyonoh/Financial-Compliance-Ledger/internal/config"
+	"github.com/kingsleyonoh/Financial-Compliance-Ledger/internal/engine"
 	"github.com/kingsleyonoh/Financial-Compliance-Ledger/internal/store"
 )
 
@@ -38,7 +39,9 @@ func main() {
 
 	ds := store.NewDiscrepancyStore(pool)
 	es := store.NewEventStore(pool)
+	rs := store.NewRuleStore(pool)
 	discrepancyHandler := handlers.NewDiscrepancyHandler(ds, es)
+	rulesHandler := handlers.NewRulesHandler(rs)
 	statsHandler := handlers.NewStatsHandler(pool)
 
 	router := api.NewRouter(api.RouterDeps{
@@ -48,8 +51,17 @@ func main() {
 		HealthHandler:      healthHandler,
 		TenantHandler:      tenantHandler,
 		DiscrepancyHandler: discrepancyHandler,
+		RulesHandler:       rulesHandler,
 		StatsHandler:       statsHandler,
 	})
+
+	// Start escalation engine
+	escalationInterval := time.Duration(cfg.EscalationIntervalMinutes) * time.Minute
+	escEngine := engine.NewEscalationEngine(
+		rs, ds, es, pool, logger, escalationInterval)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go escEngine.Start(ctx)
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%s", cfg.Port),

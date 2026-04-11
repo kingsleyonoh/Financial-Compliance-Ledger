@@ -67,6 +67,7 @@ func cleanupTenantData(t *testing.T, pool *pgxpool.Pool, tenantIDs ...uuid.UUID)
 	defer cancel()
 
 	for _, tid := range tenantIDs {
+		_, _ = pool.Exec(ctx, `DELETE FROM notification_log WHERE tenant_id = $1`, tid)
 		_, _ = pool.Exec(ctx, `DELETE FROM ledger_events WHERE tenant_id = $1`, tid)
 		_, _ = pool.Exec(ctx, `DELETE FROM escalation_rules WHERE tenant_id = $1`, tid)
 		_, _ = pool.Exec(ctx, `DELETE FROM reports WHERE tenant_id = $1`, tid)

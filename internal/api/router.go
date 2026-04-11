@@ -25,6 +25,7 @@ type RouterDeps struct {
 	HealthHandler       *handlers.HealthHandler
 	TenantHandler       *handlers.TenantHandler
 	DiscrepancyHandler  *handlers.DiscrepancyHandler
+	RulesHandler        *handlers.RulesHandler
 	StatsHandler        *handlers.StatsHandler
 }
 
@@ -66,11 +67,11 @@ func NewRouter(deps RouterDeps) *chi.Mux {
 		})
 
 		r.Route("/api/rules", func(r chi.Router) {
-			r.Get("/", placeholderHandler)
-			r.Post("/", placeholderHandler)
+			r.Get("/", rulesListRoute(deps))
+			r.Post("/", rulesCreateRoute(deps))
 			r.Get("/{id}", placeholderHandler)
-			r.Put("/{id}", placeholderHandler)
-			r.Delete("/{id}", placeholderHandler)
+			r.Put("/{id}", rulesUpdateRoute(deps))
+			r.Delete("/{id}", rulesDeleteRoute(deps))
 		})
 
 		r.Route("/api/reports", func(r chi.Router) {
@@ -177,6 +178,38 @@ func discrepancyAddNoteRoute(deps RouterDeps) http.HandlerFunc {
 func statsRoute(deps RouterDeps) http.HandlerFunc {
 	if deps.StatsHandler != nil {
 		return deps.StatsHandler.GetStats
+	}
+	return placeholderHandler
+}
+
+// rulesListRoute returns the rules list handler or a placeholder.
+func rulesListRoute(deps RouterDeps) http.HandlerFunc {
+	if deps.RulesHandler != nil {
+		return deps.RulesHandler.List
+	}
+	return placeholderHandler
+}
+
+// rulesCreateRoute returns the rules create handler or a placeholder.
+func rulesCreateRoute(deps RouterDeps) http.HandlerFunc {
+	if deps.RulesHandler != nil {
+		return deps.RulesHandler.Create
+	}
+	return placeholderHandler
+}
+
+// rulesUpdateRoute returns the rules update handler or a placeholder.
+func rulesUpdateRoute(deps RouterDeps) http.HandlerFunc {
+	if deps.RulesHandler != nil {
+		return deps.RulesHandler.Update
+	}
+	return placeholderHandler
+}
+
+// rulesDeleteRoute returns the rules delete handler or a placeholder.
+func rulesDeleteRoute(deps RouterDeps) http.HandlerFunc {
+	if deps.RulesHandler != nil {
+		return deps.RulesHandler.Delete
 	}
 	return placeholderHandler
 }
