@@ -34,6 +34,27 @@ const (
 	TypeTiming    = "timing"
 )
 
+// Resolution type constants for discrepancy resolution.
+const (
+	ResolutionMatchFound       = "match_found"
+	ResolutionFalsePositive    = "false_positive"
+	ResolutionManualAdjustment = "manual_adjustment"
+	ResolutionWriteOff         = "write_off"
+)
+
+// validResolutionTypes is the set of allowed resolution types.
+var validResolutionTypes = map[string]bool{
+	ResolutionMatchFound:       true,
+	ResolutionFalsePositive:    true,
+	ResolutionManualAdjustment: true,
+	ResolutionWriteOff:         true,
+}
+
+// ValidResolutionType returns true if the given string is a valid resolution type.
+func ValidResolutionType(rt string) bool {
+	return validResolutionTypes[rt]
+}
+
 // validTransitions defines the allowed state machine transitions.
 // Key = current status, Value = set of allowed next statuses.
 var validTransitions = map[string]map[string]bool{

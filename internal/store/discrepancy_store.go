@@ -8,10 +8,19 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/kingsleyonoh/Financial-Compliance-Ledger/internal/domain"
 )
+
+// DBTX is a common interface satisfied by both *pgxpool.Pool and pgx.Tx,
+// enabling store methods to run inside or outside a transaction.
+type DBTX interface {
+	Exec(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error)
+	QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row
+	Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error)
+}
 
 // ListFilters holds filter and pagination options for listing discrepancies.
 type ListFilters struct {
@@ -33,6 +42,12 @@ type DiscrepancyStore struct {
 // NewDiscrepancyStore creates a new DiscrepancyStore.
 func NewDiscrepancyStore(pool *pgxpool.Pool) *DiscrepancyStore {
 	return &DiscrepancyStore{pool: pool}
+}
+
+// Pool returns the underlying connection pool. Used by handlers that need
+// to run transactional operations spanning multiple stores.
+func (s *DiscrepancyStore) Pool() *pgxpool.Pool {
+	return s.pool
 }
 
 // Create inserts a new discrepancy and returns it with generated fields.
@@ -242,7 +257,15 @@ func (s *DiscrepancyStore) UpdateStatus(
 	ctx context.Context, tenantID, id uuid.UUID,
 	newStatus string, resolvedAt *time.Time,
 ) error {
-	tag, err := s.pool.Exec(ctx, `
+	return UpdateStatusWith(ctx, s.pool, tenantID, id, newStatus, resolvedAt)
+}
+
+// UpdateStatusWith updates status using the provided DBTX (pool or tx).
+func UpdateStatusWith(
+	ctx context.Context, db DBTX, tenantID, id uuid.UUID,
+	newStatus string, resolvedAt *time.Time,
+) error {
+	tag, err := db.Exec(ctx, `
 		UPDATE discrepancies
 		SET status = $1, resolved_at = $2, updated_at = NOW()
 		WHERE tenant_id = $3 AND id = $4
@@ -254,6 +277,26 @@ func (s *DiscrepancyStore) UpdateStatus(
 		return fmt.Errorf("discrepancy_store.UpdateStatus: not found")
 	}
 	return nil
+}
+
+// GetByIDWith fetches a discrepancy using the provided DBTX (pool or tx).
+func GetByIDWith(
+	ctx context.Context, db DBTX, tenantID uuid.UUID, id uuid.UUID,
+) (*domain.Discrepancy, error) {
+	row := db.QueryRow(ctx, `
+		SELECT id, tenant_id, external_id, source_system, discrepancy_type,
+			severity, status, title, description, amount_expected,
+			amount_actual, currency, metadata, first_detected_at,
+			resolved_at, created_at, updated_at
+		FROM discrepancies
+		WHERE tenant_id = $1 AND id = $2
+	`, tenantID, id)
+
+	d, err := scanDiscrepancy(row)
+	if err != nil {
+		return nil, fmt.Errorf("discrepancy_store.GetByIDWith: %w", err)
+	}
+	return d, nil
 }
 
 // scanDiscrepancy scans a single row from QueryRow into a Discrepancy.

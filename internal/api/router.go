@@ -59,6 +59,10 @@ func NewRouter(deps RouterDeps) *chi.Mux {
 			r.Post("/", placeholderHandler)
 			r.Get("/{id}", discrepancyGetRoute(deps))
 			r.Put("/{id}/status", placeholderHandler)
+			r.Post("/{id}/acknowledge", discrepancyAcknowledgeRoute(deps))
+			r.Post("/{id}/investigate", discrepancyInvestigateRoute(deps))
+			r.Post("/{id}/resolve", discrepancyResolveRoute(deps))
+			r.Post("/{id}/notes", discrepancyAddNoteRoute(deps))
 		})
 
 		r.Route("/api/rules", func(r chi.Router) {
@@ -133,6 +137,38 @@ func discrepancyListRoute(deps RouterDeps) http.HandlerFunc {
 func discrepancyGetRoute(deps RouterDeps) http.HandlerFunc {
 	if deps.DiscrepancyHandler != nil {
 		return deps.DiscrepancyHandler.GetByID
+	}
+	return placeholderHandler
+}
+
+// discrepancyAcknowledgeRoute returns the acknowledge handler or a placeholder.
+func discrepancyAcknowledgeRoute(deps RouterDeps) http.HandlerFunc {
+	if deps.DiscrepancyHandler != nil {
+		return deps.DiscrepancyHandler.Acknowledge
+	}
+	return placeholderHandler
+}
+
+// discrepancyInvestigateRoute returns the investigate handler or a placeholder.
+func discrepancyInvestigateRoute(deps RouterDeps) http.HandlerFunc {
+	if deps.DiscrepancyHandler != nil {
+		return deps.DiscrepancyHandler.Investigate
+	}
+	return placeholderHandler
+}
+
+// discrepancyResolveRoute returns the resolve handler or a placeholder.
+func discrepancyResolveRoute(deps RouterDeps) http.HandlerFunc {
+	if deps.DiscrepancyHandler != nil {
+		return deps.DiscrepancyHandler.Resolve
+	}
+	return placeholderHandler
+}
+
+// discrepancyAddNoteRoute returns the add-note handler or a placeholder.
+func discrepancyAddNoteRoute(deps RouterDeps) http.HandlerFunc {
+	if deps.DiscrepancyHandler != nil {
+		return deps.DiscrepancyHandler.AddNote
 	}
 	return placeholderHandler
 }

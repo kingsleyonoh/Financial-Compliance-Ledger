@@ -28,6 +28,14 @@ func NewEventStore(pool *pgxpool.Pool) *EventStore {
 func (s *EventStore) Append(
 	ctx context.Context, tenantID uuid.UUID, event *domain.LedgerEvent,
 ) (*domain.LedgerEvent, error) {
+	return AppendWith(ctx, s.pool, tenantID, event)
+}
+
+// AppendWith inserts a new event using the provided DBTX (pool or tx).
+func AppendWith(
+	ctx context.Context, db DBTX, tenantID uuid.UUID,
+	event *domain.LedgerEvent,
+) (*domain.LedgerEvent, error) {
 	payloadBytes, err := json.Marshal(event.Payload)
 	if err != nil {
 		return nil, fmt.Errorf("event_store.Append: marshal payload: %w", err)
@@ -35,7 +43,7 @@ func (s *EventStore) Append(
 
 	var e domain.LedgerEvent
 	var payloadOut []byte
-	err = s.pool.QueryRow(ctx, `
+	err = db.QueryRow(ctx, `
 		INSERT INTO ledger_events
 			(tenant_id, discrepancy_id, event_type, actor, actor_type, payload)
 		VALUES ($1, $2, $3, $4, $5, $6)
@@ -124,6 +132,36 @@ func (s *EventStore) CountByType(
 		return nil, fmt.Errorf("event_store.CountByType: rows: %w", err)
 	}
 	return counts, nil
+}
+
+// GetLatestSequence returns the highest sequence_num for events belonging
+// to the given discrepancy. Returns 0 if no events exist yet. Used for
+// optimistic locking on workflow actions.
+func (s *EventStore) GetLatestSequence(
+	ctx context.Context, tenantID uuid.UUID, discrepancyID uuid.UUID,
+) (int64, error) {
+	return GetLatestSequenceWith(ctx, s.pool, tenantID, discrepancyID)
+}
+
+// GetLatestSequenceWith returns the highest sequence_num using the provided
+// DBTX (pool or tx). Returns 0 if no events exist yet.
+func GetLatestSequenceWith(
+	ctx context.Context, db DBTX, tenantID uuid.UUID,
+	discrepancyID uuid.UUID,
+) (int64, error) {
+	var seq *int64
+	err := db.QueryRow(ctx, `
+		SELECT MAX(sequence_num)
+		FROM ledger_events
+		WHERE tenant_id = $1 AND discrepancy_id = $2
+	`, tenantID, discrepancyID).Scan(&seq)
+	if err != nil {
+		return 0, fmt.Errorf("event_store.GetLatestSequence: %w", err)
+	}
+	if seq == nil {
+		return 0, nil
+	}
+	return *seq, nil
 }
 
 // ExistsForDiscrepancy checks if an event of the given type already exists
