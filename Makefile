@@ -7,13 +7,13 @@ build:
 	go build -o bin/server cmd/server/main.go
 
 test:
-	go test ./...
+	go test -p 1 ./...
 
 test-verbose:
-	go test -v ./...
+	go test -p 1 -v ./...
 
 test-cover:
-	go test -coverprofile=coverage.out ./... && go tool cover -html=coverage.out
+	go test -p 1 -coverprofile=coverage.out ./... && go tool cover -html=coverage.out
 
 test-e2e:
 	@echo "Starting server for E2E tests..."
