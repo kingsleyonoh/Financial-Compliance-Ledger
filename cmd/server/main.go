@@ -36,12 +36,19 @@ func main() {
 	healthHandler := handlers.NewHealthHandler(pool, cfg.NATSURL)
 	tenantHandler := handlers.NewTenantHandler(pool, &cfg)
 
+	ds := store.NewDiscrepancyStore(pool)
+	es := store.NewEventStore(pool)
+	discrepancyHandler := handlers.NewDiscrepancyHandler(ds, es)
+	statsHandler := handlers.NewStatsHandler(pool)
+
 	router := api.NewRouter(api.RouterDeps{
-		Pool:          pool,
-		Logger:        logger,
-		Config:        &cfg,
-		HealthHandler: healthHandler,
-		TenantHandler: tenantHandler,
+		Pool:               pool,
+		Logger:             logger,
+		Config:             &cfg,
+		HealthHandler:      healthHandler,
+		TenantHandler:      tenantHandler,
+		DiscrepancyHandler: discrepancyHandler,
+		StatsHandler:       statsHandler,
 	})
 
 	srv := &http.Server{

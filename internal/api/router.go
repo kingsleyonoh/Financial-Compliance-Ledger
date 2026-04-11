@@ -19,11 +19,13 @@ import (
 // Fields are nil-safe: if Pool is nil, tenant middleware is skipped
 // (useful for unit tests that don't need DB).
 type RouterDeps struct {
-	Pool          *pgxpool.Pool
-	Logger        zerolog.Logger
-	Config        *config.Config
-	HealthHandler *handlers.HealthHandler
-	TenantHandler *handlers.TenantHandler
+	Pool                *pgxpool.Pool
+	Logger              zerolog.Logger
+	Config              *config.Config
+	HealthHandler       *handlers.HealthHandler
+	TenantHandler       *handlers.TenantHandler
+	DiscrepancyHandler  *handlers.DiscrepancyHandler
+	StatsHandler        *handlers.StatsHandler
 }
 
 // NewRouter creates a configured Chi router with all route groups,
@@ -53,9 +55,9 @@ func NewRouter(deps RouterDeps) *chi.Mux {
 		r.Get("/api/tenants/me", tenantMeRoute(deps))
 
 		r.Route("/api/discrepancies", func(r chi.Router) {
-			r.Get("/", placeholderHandler)
+			r.Get("/", discrepancyListRoute(deps))
 			r.Post("/", placeholderHandler)
-			r.Get("/{id}", placeholderHandler)
+			r.Get("/{id}", discrepancyGetRoute(deps))
 			r.Put("/{id}/status", placeholderHandler)
 		})
 
@@ -74,7 +76,7 @@ func NewRouter(deps RouterDeps) *chi.Mux {
 			r.Get("/{id}/download", placeholderHandler)
 		})
 
-		r.Get("/api/stats", placeholderHandler)
+		r.Get("/api/stats", statsRoute(deps))
 	})
 
 	return r
@@ -117,6 +119,30 @@ func defaultHealthHandler(w http.ResponseWriter, r *http.Request) {
 func placeholderHandler(w http.ResponseWriter, r *http.Request) {
 	handlers.RespondError(w, http.StatusNotImplemented,
 		"NOT_IMPLEMENTED", "This endpoint is not yet implemented")
+}
+
+// discrepancyListRoute returns the list handler or a placeholder.
+func discrepancyListRoute(deps RouterDeps) http.HandlerFunc {
+	if deps.DiscrepancyHandler != nil {
+		return deps.DiscrepancyHandler.List
+	}
+	return placeholderHandler
+}
+
+// discrepancyGetRoute returns the get-by-ID handler or a placeholder.
+func discrepancyGetRoute(deps RouterDeps) http.HandlerFunc {
+	if deps.DiscrepancyHandler != nil {
+		return deps.DiscrepancyHandler.GetByID
+	}
+	return placeholderHandler
+}
+
+// statsRoute returns the stats handler or a placeholder.
+func statsRoute(deps RouterDeps) http.HandlerFunc {
+	if deps.StatsHandler != nil {
+		return deps.StatsHandler.GetStats
+	}
+	return placeholderHandler
 }
 
 // requireAuthStub is a middleware that rejects all requests with 401
