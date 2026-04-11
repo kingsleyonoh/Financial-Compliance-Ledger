@@ -17,6 +17,7 @@ import (
 type ReportsHandler struct {
 	reportStore     *store.ReportStore
 	reportGenerator *report.ReportGenerator
+	storagePath     string
 }
 
 // NewReportsHandler creates a new ReportsHandler.

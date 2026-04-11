@@ -28,6 +28,7 @@ type RouterDeps struct {
 	RulesHandler        *handlers.RulesHandler
 	StatsHandler        *handlers.StatsHandler
 	ReportsHandler      *handlers.ReportsHandler
+	MetricsHandler      *handlers.MetricsHandler
 }
 
 // NewRouter creates a configured Chi router with all route groups,
@@ -43,6 +44,7 @@ func NewRouter(deps RouterDeps) *chi.Mux {
 
 	// Public routes (no auth required)
 	r.Get("/health", healthRoute(deps))
+	r.Get("/metrics", metricsRoute(deps))
 	r.Post("/api/tenants/register", registerRoute(deps))
 
 	// Authenticated API routes
@@ -79,7 +81,7 @@ func NewRouter(deps RouterDeps) *chi.Mux {
 			r.Get("/", reportsListRoute(deps))
 			r.Post("/", reportsCreateRoute(deps))
 			r.Get("/{id}", placeholderHandler)
-			r.Get("/{id}/download", placeholderHandler)
+			r.Get("/{id}/download", reportsDownloadRoute(deps))
 		})
 
 		r.Get("/api/stats", statsRoute(deps))
@@ -227,6 +229,22 @@ func reportsListRoute(deps RouterDeps) http.HandlerFunc {
 func reportsCreateRoute(deps RouterDeps) http.HandlerFunc {
 	if deps.ReportsHandler != nil {
 		return deps.ReportsHandler.Create
+	}
+	return placeholderHandler
+}
+
+// reportsDownloadRoute returns the report download handler or a placeholder.
+func reportsDownloadRoute(deps RouterDeps) http.HandlerFunc {
+	if deps.ReportsHandler != nil {
+		return deps.ReportsHandler.Download
+	}
+	return placeholderHandler
+}
+
+// metricsRoute returns the Prometheus metrics handler or a placeholder.
+func metricsRoute(deps RouterDeps) http.HandlerFunc {
+	if deps.MetricsHandler != nil {
+		return deps.MetricsHandler.Handle
 	}
 	return placeholderHandler
 }

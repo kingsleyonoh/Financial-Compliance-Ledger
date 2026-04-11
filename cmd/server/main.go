@@ -55,6 +55,9 @@ func main() {
 	reportGen := report.NewReportGenerator(
 		ds, es, rptStore, cfg.ReportStoragePath, cfg.ReportMaxEvents, logger)
 	reportsHandler := handlers.NewReportsHandler(rptStore, reportGen)
+	reportsHandler.SetStoragePath(cfg.ReportStoragePath)
+
+	metricsHandler := handlers.NewMetricsHandler()
 
 	router := api.NewRouter(api.RouterDeps{
 		Pool:               pool,
@@ -66,6 +69,7 @@ func main() {
 		RulesHandler:       rulesHandler,
 		StatsHandler:       statsHandler,
 		ReportsHandler:     reportsHandler,
+		MetricsHandler:     metricsHandler,
 	})
 
 	// Notification Hub client
@@ -85,6 +89,15 @@ func main() {
 	retrier := engine.NewNotificationRetrier(
 		ns, hubClient, cfg.MaxNotificationRetries, logger)
 	go retrier.Start(ctx)
+
+	// Start RAG feeder and sync goroutine
+	ragFeeder := engine.NewRAGFeeder(&cfg, ds, es, logger)
+	ragSyncer := engine.NewRAGSyncer(ragFeeder, ds, logger)
+	go ragSyncer.StartSync(ctx)
+
+	// Start metrics collector goroutine
+	metricsCollector := engine.NewMetricsCollector(pool, logger)
+	go metricsCollector.Start(ctx)
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%s", cfg.Port),
