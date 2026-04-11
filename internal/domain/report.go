@@ -16,6 +16,7 @@ const (
 	ReportStatusGenerating = "generating"
 	ReportStatusCompleted  = "completed"
 	ReportStatusFailed     = "failed"
+	ReportStatusCleaned    = "cleaned"
 )
 
 // validReportTypes is the set of all allowed report types.
@@ -32,6 +33,7 @@ var validReportStatuses = map[string]bool{
 	ReportStatusGenerating: true,
 	ReportStatusCompleted:  true,
 	ReportStatusFailed:     true,
+	ReportStatusCleaned:    true,
 }
 
 // Report represents metadata for a generated compliance report.

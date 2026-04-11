@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -150,4 +151,57 @@ func scanReportRow(rows pgx.Rows) (*domain.Report, error) {
 		_ = json.Unmarshal(paramsBytes, &r.Parameters)
 	}
 	return &r, nil
+}
+
+// ListOlderThan returns all reports with created_at before the given
+// time and matching the given status. Used by the report cleanup
+// goroutine to find expired completed reports.
+func (s *ReportStore) ListOlderThan(
+	ctx context.Context, olderThan time.Time, status string,
+) ([]*domain.Report, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, tenant_id, report_type, title, parameters,
+			status, file_path, file_size_bytes, generated_by,
+			created_at, updated_at
+		FROM reports
+		WHERE created_at < $1 AND status = $2
+		ORDER BY created_at ASC
+	`, olderThan, status)
+	if err != nil {
+		return nil, fmt.Errorf("report_store.ListOlderThan: %w", err)
+	}
+	defer rows.Close()
+
+	var reports []*domain.Report
+	for rows.Next() {
+		r, err := scanReportRow(rows)
+		if err != nil {
+			return nil, fmt.Errorf("report_store.ListOlderThan: scan: %w", err)
+		}
+		reports = append(reports, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("report_store.ListOlderThan: rows: %w", err)
+	}
+	return reports, nil
+}
+
+// MarkCleaned updates a report's status to "cleaned" and clears the
+// file_path. Used after the report cleanup goroutine deletes the PDF.
+func (s *ReportStore) MarkCleaned(
+	ctx context.Context, id uuid.UUID,
+) error {
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE reports
+		SET status = 'cleaned', file_path = NULL,
+			file_size_bytes = NULL, updated_at = NOW()
+		WHERE id = $1
+	`, id)
+	if err != nil {
+		return fmt.Errorf("report_store.MarkCleaned: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("report_store.MarkCleaned: not found")
+	}
+	return nil
 }

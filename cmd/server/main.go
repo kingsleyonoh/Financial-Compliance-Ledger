@@ -99,6 +99,10 @@ func main() {
 	metricsCollector := engine.NewMetricsCollector(pool, logger)
 	go metricsCollector.Start(ctx)
 
+	// Start report cleanup goroutine (daily at 02:00 UTC)
+	reportCleaner := engine.NewReportCleaner(rptStore, cfg.ReportStoragePath, logger)
+	go reportCleaner.Start(ctx)
+
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%s", cfg.Port),
 		Handler:      router,
