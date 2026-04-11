@@ -20,6 +20,7 @@ import (
 	"github.com/kingsleyonoh/Financial-Compliance-Ledger/internal/config"
 	"github.com/kingsleyonoh/Financial-Compliance-Ledger/internal/engine"
 	"github.com/kingsleyonoh/Financial-Compliance-Ledger/internal/notify"
+	"github.com/kingsleyonoh/Financial-Compliance-Ledger/internal/report"
 	"github.com/kingsleyonoh/Financial-Compliance-Ledger/internal/store"
 )
 
@@ -41,9 +42,19 @@ func main() {
 	ds := store.NewDiscrepancyStore(pool)
 	es := store.NewEventStore(pool)
 	rs := store.NewRuleStore(pool)
+	rptStore := store.NewReportStore(pool)
 	discrepancyHandler := handlers.NewDiscrepancyHandler(ds, es)
 	rulesHandler := handlers.NewRulesHandler(rs)
 	statsHandler := handlers.NewStatsHandler(pool)
+
+	// Ensure report storage directory exists
+	if err := os.MkdirAll(cfg.ReportStoragePath, 0o755); err != nil {
+		logger.Warn().Err(err).Msg("failed to create report storage directory")
+	}
+
+	reportGen := report.NewReportGenerator(
+		ds, es, rptStore, cfg.ReportStoragePath, cfg.ReportMaxEvents, logger)
+	reportsHandler := handlers.NewReportsHandler(rptStore, reportGen)
 
 	router := api.NewRouter(api.RouterDeps{
 		Pool:               pool,
@@ -54,6 +65,7 @@ func main() {
 		DiscrepancyHandler: discrepancyHandler,
 		RulesHandler:       rulesHandler,
 		StatsHandler:       statsHandler,
+		ReportsHandler:     reportsHandler,
 	})
 
 	// Notification Hub client

@@ -27,6 +27,7 @@ type RouterDeps struct {
 	DiscrepancyHandler  *handlers.DiscrepancyHandler
 	RulesHandler        *handlers.RulesHandler
 	StatsHandler        *handlers.StatsHandler
+	ReportsHandler      *handlers.ReportsHandler
 }
 
 // NewRouter creates a configured Chi router with all route groups,
@@ -75,8 +76,8 @@ func NewRouter(deps RouterDeps) *chi.Mux {
 		})
 
 		r.Route("/api/reports", func(r chi.Router) {
-			r.Get("/", placeholderHandler)
-			r.Post("/", placeholderHandler)
+			r.Get("/", reportsListRoute(deps))
+			r.Post("/", reportsCreateRoute(deps))
 			r.Get("/{id}", placeholderHandler)
 			r.Get("/{id}/download", placeholderHandler)
 		})
@@ -210,6 +211,22 @@ func rulesUpdateRoute(deps RouterDeps) http.HandlerFunc {
 func rulesDeleteRoute(deps RouterDeps) http.HandlerFunc {
 	if deps.RulesHandler != nil {
 		return deps.RulesHandler.Delete
+	}
+	return placeholderHandler
+}
+
+// reportsListRoute returns the reports list handler or a placeholder.
+func reportsListRoute(deps RouterDeps) http.HandlerFunc {
+	if deps.ReportsHandler != nil {
+		return deps.ReportsHandler.List
+	}
+	return placeholderHandler
+}
+
+// reportsCreateRoute returns the reports create handler or a placeholder.
+func reportsCreateRoute(deps RouterDeps) http.HandlerFunc {
+	if deps.ReportsHandler != nil {
+		return deps.ReportsHandler.Create
 	}
 	return placeholderHandler
 }
