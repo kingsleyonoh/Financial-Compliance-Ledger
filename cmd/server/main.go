@@ -19,6 +19,7 @@ import (
 	mw "github.com/kingsleyonoh/Financial-Compliance-Ledger/internal/api/middleware"
 	"github.com/kingsleyonoh/Financial-Compliance-Ledger/internal/config"
 	"github.com/kingsleyonoh/Financial-Compliance-Ledger/internal/engine"
+	"github.com/kingsleyonoh/Financial-Compliance-Ledger/internal/notify"
 	"github.com/kingsleyonoh/Financial-Compliance-Ledger/internal/store"
 )
 
@@ -55,13 +56,23 @@ func main() {
 		StatsHandler:       statsHandler,
 	})
 
-	// Start escalation engine
+	// Notification Hub client
+	hubClient := notify.NewHubClient(&cfg, logger)
+	ns := store.NewNotificationStore(pool)
+
+	// Start escalation engine with notification support
 	escalationInterval := time.Duration(cfg.EscalationIntervalMinutes) * time.Minute
 	escEngine := engine.NewEscalationEngine(
 		rs, ds, es, pool, logger, escalationInterval)
+	escEngine.WithNotifications(ns, hubClient)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go escEngine.Start(ctx)
+
+	// Start notification retry goroutine
+	retrier := engine.NewNotificationRetrier(
+		ns, hubClient, cfg.MaxNotificationRetries, logger)
+	go retrier.Start(ctx)
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%s", cfg.Port),

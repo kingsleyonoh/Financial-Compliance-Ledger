@@ -10,6 +10,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/kingsleyonoh/Financial-Compliance-Ledger/internal/domain"
+	"github.com/kingsleyonoh/Financial-Compliance-Ledger/internal/notify"
 	"github.com/kingsleyonoh/Financial-Compliance-Ledger/internal/store"
 )
 
@@ -17,12 +18,14 @@ import (
 // For each active tenant, it checks all active rules against matching
 // discrepancies and executes the configured action.
 type EscalationEngine struct {
-	ruleStore        *store.RuleStore
-	discrepancyStore *store.DiscrepancyStore
-	eventStore       *store.EventStore
-	pool             *pgxpool.Pool
-	interval         time.Duration
-	logger           zerolog.Logger
+	ruleStore         *store.RuleStore
+	discrepancyStore  *store.DiscrepancyStore
+	eventStore        *store.EventStore
+	notificationStore *store.NotificationStore
+	hubClient         notify.NotificationSender
+	pool              *pgxpool.Pool
+	interval          time.Duration
+	logger            zerolog.Logger
 }
 
 // NewEscalationEngine creates a new EscalationEngine.
@@ -43,6 +46,17 @@ func NewEscalationEngine(
 		logger: logger.With().
 			Str("component", "escalation-engine").Logger(),
 	}
+}
+
+// WithNotifications sets the notification dependencies on the engine.
+// Returns the engine for chaining.
+func (e *EscalationEngine) WithNotifications(
+	ns *store.NotificationStore,
+	hubClient notify.NotificationSender,
+) *EscalationEngine {
+	e.notificationStore = ns
+	e.hubClient = hubClient
+	return e
 }
 
 // Start runs the evaluation loop on the configured interval.

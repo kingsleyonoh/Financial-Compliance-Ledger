@@ -30,50 +30,6 @@ func (e *EscalationEngine) executeAction(
 	}
 }
 
-// executeNotify logs a notification entry. The actual hub client
-// delivery will be implemented in a future batch.
-func (e *EscalationEngine) executeNotify(
-	ctx context.Context, tenantID uuid.UUID,
-	rule *domain.EscalationRule, disc *domain.Discrepancy,
-) error {
-	discID, err := uuid.Parse(disc.ID)
-	if err != nil {
-		return fmt.Errorf("executeNotify: parse disc ID: %w", err)
-	}
-	ruleID, err := uuid.Parse(rule.ID)
-	if err != nil {
-		return fmt.Errorf("executeNotify: parse rule ID: %w", err)
-	}
-
-	// Dedup: check if this rule already fired for this discrepancy
-	already, err := e.notificationExists(ctx, tenantID, discID, ruleID)
-	if err != nil {
-		return fmt.Errorf("executeNotify: dedup check: %w", err)
-	}
-	if already {
-		return nil
-	}
-
-	// Log notification entry (hub client delivery is future work)
-	_, err = e.pool.Exec(ctx, `
-		INSERT INTO notification_log
-			(tenant_id, discrepancy_id, escalation_rule_id,
-			 channel, recipient, status, attempts)
-		VALUES ($1, $2, $3, 'in_app', 'escalation-engine', 'pending', 0)
-	`, tenantID, discID, ruleID)
-	if err != nil {
-		return fmt.Errorf("executeNotify: insert log: %w", err)
-	}
-
-	e.logger.Info().
-		Str("tenant_id", tenantID.String()).
-		Str("discrepancy_id", disc.ID).
-		Str("rule_name", rule.Name).
-		Msg("notification logged (hub client pending)")
-
-	return nil
-}
-
 // executeEscalate changes the discrepancy status to escalated and
 // appends a discrepancy.escalated event. Optionally upgrades severity
 // if action_config.new_severity is set.
@@ -207,24 +163,4 @@ func (e *EscalationEngine) executeAutoClose(
 		Msg("discrepancy auto-closed")
 
 	return nil
-}
-
-// notificationExists checks if a notification_log entry already exists
-// for this rule and discrepancy combination.
-func (e *EscalationEngine) notificationExists(
-	ctx context.Context, tenantID, discrepancyID, ruleID uuid.UUID,
-) (bool, error) {
-	var exists bool
-	err := e.pool.QueryRow(ctx, `
-		SELECT EXISTS (
-			SELECT 1 FROM notification_log
-			WHERE tenant_id = $1
-			  AND discrepancy_id = $2
-			  AND escalation_rule_id = $3
-		)
-	`, tenantID, discrepancyID, ruleID).Scan(&exists)
-	if err != nil {
-		return false, fmt.Errorf("notificationExists: %w", err)
-	}
-	return exists, nil
 }
