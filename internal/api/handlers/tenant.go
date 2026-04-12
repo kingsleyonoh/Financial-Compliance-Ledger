@@ -130,6 +130,11 @@ func (h *TenantHandler) Register(w http.ResponseWriter, r *http.Request) {
 			"MISSING_NAME", "Tenant name is required")
 		return
 	}
+	if len(body.Name) > 255 {
+		RespondError(w, http.StatusBadRequest,
+			"NAME_TOO_LONG", "Tenant name must be 255 characters or fewer")
+		return
+	}
 
 	plainKey, hashedKey, err := generateAPIKey()
 	if err != nil {

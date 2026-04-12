@@ -242,6 +242,9 @@ func validateCreateRule(req *createRuleRequest) string {
 	if req.Name == "" {
 		return "name is required"
 	}
+	if len(req.Name) > 255 {
+		return "name must be 255 characters or fewer"
+	}
 	if req.SeverityMatch == "" {
 		return "severity_match is required"
 	}
@@ -268,6 +271,9 @@ func validateCreateRule(req *createRuleRequest) string {
 
 // validateUpdateRule checks that any provided enum values are valid.
 func validateUpdateRule(req *updateRuleRequest) string {
+	if req.Name != nil && len(*req.Name) > 255 {
+		return "name must be 255 characters or fewer"
+	}
 	if req.SeverityMatch != nil && !domain.ValidSeverityMatch(*req.SeverityMatch) {
 		return "invalid severity_match value"
 	}

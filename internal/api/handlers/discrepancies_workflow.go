@@ -57,7 +57,8 @@ func parseTenantAndDiscrepancy(
 	return tid, discID, true
 }
 
-// decodeWorkflowRequest decodes the JSON body into a workflowRequest.
+// decodeWorkflowRequest decodes the JSON body into a workflowRequest
+// and validates string length limits.
 func decodeWorkflowRequest(
 	w http.ResponseWriter, r *http.Request,
 ) (*workflowRequest, bool) {
@@ -67,6 +68,23 @@ func decodeWorkflowRequest(
 			"INVALID_BODY", "Invalid JSON request body")
 		return nil, false
 	}
+
+	if len(req.Actor) > 255 {
+		RespondError(w, http.StatusBadRequest,
+			"ACTOR_TOO_LONG", "actor must be 255 characters or fewer")
+		return nil, false
+	}
+	if len(req.Notes) > 10000 {
+		RespondError(w, http.StatusBadRequest,
+			"NOTES_TOO_LONG", "notes must be 10000 characters or fewer")
+		return nil, false
+	}
+	if len(req.Content) > 10000 {
+		RespondError(w, http.StatusBadRequest,
+			"CONTENT_TOO_LONG", "content must be 10000 characters or fewer")
+		return nil, false
+	}
+
 	return &req, true
 }
 

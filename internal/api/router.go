@@ -41,6 +41,8 @@ func NewRouter(deps RouterDeps) *chi.Mux {
 	r.Use(chimw.RequestID)
 	r.Use(mw.RequestLogger(deps.Logger))
 	r.Use(chimw.Recoverer)
+	r.Use(mw.NewRateLimiter(60))
+	r.Use(maxBodySize(1 << 20)) // 1 MB request body limit
 
 	// Public routes (no auth required)
 	r.Get("/health", healthRoute(deps))
@@ -247,6 +249,17 @@ func metricsRoute(deps RouterDeps) http.HandlerFunc {
 		return deps.MetricsHandler.Handle
 	}
 	return placeholderHandler
+}
+
+// maxBodySize returns middleware that limits request body size to the
+// given number of bytes. Requests exceeding the limit receive 413.
+func maxBodySize(n int64) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			r.Body = http.MaxBytesReader(w, r.Body, n)
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // requireAuthStub is a middleware that rejects all requests with 401

@@ -158,5 +158,8 @@ func validateCreateReport(req *createReportRequest) error {
 	if req.DateTo == "" {
 		return fmt.Errorf("date_to is required")
 	}
+	if len(req.Title) > 500 {
+		return fmt.Errorf("title must be 500 characters or fewer")
+	}
 	return nil
 }
