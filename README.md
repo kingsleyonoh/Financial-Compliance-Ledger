@@ -2,8 +2,6 @@
 
 Built by [Kingsley Onoh](https://kingsleyonoh.com) · Systems Architect
 
-> **Live:** [https://compliance.kingsleyonoh.com](https://compliance.kingsleyonoh.com)
-
 ## The Problem
 
 When a transaction reconciliation engine flags a discrepancy — a mismatched amount, a missing settlement, a timing gap — that finding needs to survive audits. Regulators in PSD2 and MaRisk environments expect a tamper-proof record of what was found, when it was found, who looked at it, and how it was resolved. Most teams track this in spreadsheets or ticketing systems where records can be edited, deleted, or lose context. One disputed transaction can mean weeks of reconstructing history from logs.
@@ -134,7 +132,7 @@ Recon Engine ──NATS──► Ingestion ──► PostgreSQL
 ### Register a tenant and get an API key
 
 ```bash
-curl -X POST https://compliance.kingsleyonoh.com/api/tenants/register \
+curl -X POST http://localhost:8080/api/tenants/register \
   -H "Content-Type: application/json" \
   -d '{"name": "Acme Financial"}'
 ```
@@ -153,11 +151,11 @@ Save the `api_key` — it's shown only once. Use it in the `X-API-Key` header fo
 
 ```bash
 # List with filters
-curl https://compliance.kingsleyonoh.com/api/discrepancies?status=open&severity=high \
+curl http://localhost:8080/api/discrepancies?status=open&severity=high \
   -H "X-API-Key: $API_KEY"
 
 # Get one with full event timeline
-curl https://compliance.kingsleyonoh.com/api/discrepancies/$ID \
+curl http://localhost:8080/api/discrepancies/$ID \
   -H "X-API-Key: $API_KEY"
 ```
 
@@ -204,7 +202,7 @@ Resolution types: `match_found`, `false_positive`, `manual_adjustment`, `write_o
 
 ```bash
 # Create a rule: notify on high-severity discrepancies open > 24 hours
-curl -X POST https://compliance.kingsleyonoh.com/api/rules \
+curl -X POST http://localhost:8080/api/rules \
   -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
   -d '{
     "name": "Escalate high after 24h",
@@ -223,12 +221,12 @@ Actions: `notify` (send alert via Notification Hub), `escalate` (increase severi
 
 ```bash
 # Request generation (returns 202, runs in background)
-curl -X POST https://compliance.kingsleyonoh.com/api/reports \
+curl -X POST http://localhost:8080/api/reports \
   -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
   -d '{"report_type": "daily_summary", "date_from": "2026-04-01", "date_to": "2026-04-30"}'
 
 # Download when ready
-curl https://compliance.kingsleyonoh.com/api/reports/$REPORT_ID/download \
+curl http://localhost:8080/api/reports/$REPORT_ID/download \
   -H "X-API-Key: $API_KEY" -o report.html
 ```
 
