@@ -40,25 +40,23 @@ nats-data/
 # sqlc generated (optional — some teams commit these)
 # sqlc/gen/
 
-# AI Workflow System (proprietary — do not publish)
-# ⚠️ TRACKED DURING DEV — run /prepare-public before making repo public
-# .agent/workflows/
-# .agent/guides/
-# .agent/agents/
+# AI Workflow System (proprietary)
+.agent/workflows/
+.agent/guides/
+.agent/agents/
 .agent/.last-sync
 
 # Internal project planning
-# ⚠️ TRACKED DURING DEV — run /prepare-public before making repo public
-# docs/progress.md
+docs/progress.md
 docs/build-journal.md
 docs/architect_journal.md
-# docs/*PRD*.md
-# docs/*prd*.md
+docs/*PRD*.md
+docs/*prd*.md
 
-# YOLO Mode workspace (runtime state, not committed)
+# YOLO Mode workspace
 .yolo/
 
-# Multi-agent platform context (auto-generated, not committed)
+# Multi-agent platform context
 CLAUDE.md
 .claude/
 AGENTS.md
